@@ -11,6 +11,7 @@ import {
   type ResultadoSismos,
   type Sismo,
 } from "@/lib/sismos";
+import { Firma } from "./Firma";
 import { LeyendaProfundidad } from "./LeyendaProfundidad";
 import { ListaSismos } from "./ListaSismos";
 import { TiempoRelativo } from "./TiempoRelativo";
@@ -204,6 +205,9 @@ export function Explorador({ inicial }: { inicial: ResultadoSismos | null }) {
               </a>
               .
             </p>
+            <div className="mt-4 border-t border-borde pt-4">
+              <Firma />
+            </div>
           </footer>
         </div>
       </div>

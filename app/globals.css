@@ -10,6 +10,8 @@
   --tenue: #9aa4b1;
   --foco: #ffd166;
   --aviso: #f6b93b;
+  /* Violeta de la marca personal (HS), usado solo en la firma. */
+  --marca: #c5a1fb;
   color-scheme: dark;
 }
 
@@ -20,6 +22,7 @@
   --color-borde: var(--borde);
   --color-texto: var(--texto);
   --color-tenue: var(--tenue);
+  --color-marca: var(--marca);
   --font-sans: var(--font-geist-sans);
 }
 
