@@ -3,6 +3,17 @@
 Mapa y lista de los sismos recientes en Chile, actualizados cada minuto con datos del
 [USGS](https://earthquake.usgs.gov/fdsnws/event/1/).
 
+**Demo en vivo:** https://sismos-chile-rouge.vercel.app
+
+![Sismos Chile en escritorio: mapa de sismos y panel con el último sismo registrado](docs/captura.webp)
+
+<details>
+<summary>Vista en celular</summary>
+
+![Sismos Chile en un celular](docs/captura-movil.webp)
+
+</details>
+
 - Último sismo destacado, con magnitud, ubicación en español ("72 km al SSO de Colchane"), profundidad y hora de Chile.
 - Mapa con círculos cuyo tamaño indica la magnitud y cuyo color indica la profundidad (superficial, intermedio, profundo).
 - Filtros por período (24 h, 7 días, 30 días) y magnitud mínima; actualización automática que se puede pausar.
@@ -16,7 +27,7 @@ Next.js 16 (App Router, Cache Components) · React 19 · TypeScript · Tailwind 
 
 Requiere Node.js 20.9 o superior (se recomienda 22 LTS).
 
-```bash
+```powershell
 npm install
 npm run dev      # http://localhost:3000
 npm run lint
@@ -46,3 +57,7 @@ No necesita variables de entorno ni API keys.
 
 Este sitio no es un sistema oficial de alerta. Ante una emergencia sigue las indicaciones de
 [SENAPRED](https://senapred.cl/) y el [SHOA](https://www.shoa.cl/).
+
+## Autor
+
+**Héctor Sanhueza**: [GitHub](https://github.com/JS-Ranker) · [LinkedIn](https://www.linkedin.com/in/hectorsanhueza/)
