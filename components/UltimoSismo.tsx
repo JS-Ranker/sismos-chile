@@ -5,39 +5,50 @@ import {
   formatearMagnitud,
   type Sismo,
 } from "@/lib/sismos";
-import { colorDeProfundidad } from "./colores";
+import { MedidorProfundidad } from "./MedidorProfundidad";
 import { TiempoRelativo } from "./TiempoRelativo";
 
-export function UltimoSismo({ sismo }: { sismo: Sismo | null }) {
+interface Props {
+  sismo: Sismo | null;
+  /** true cuando es el sismo elegido por la persona y no el más reciente. */
+  elegido: boolean;
+  onVolver: () => void;
+}
+
+export function UltimoSismo({ sismo, elegido, onVolver }: Props) {
   if (!sismo) return null;
 
   return (
-    <section aria-labelledby="titulo-ultimo-sismo" className="px-4 pt-5 pb-4">
-      <h2 id="titulo-ultimo-sismo" className="etiqueta">
-        Último sismo registrado
-      </h2>
-      <div className="mt-2 flex items-start gap-4">
-        <p className="text-6xl leading-none font-semibold tracking-tight tabular-nums">
-          <span className="sr-only">Magnitud </span>
-          {formatearMagnitud(sismo.magnitud)}
-        </p>
-        <div className="min-w-0 pt-1">
-          <p className="text-lg leading-snug font-medium text-balance">{sismo.lugar}</p>
+    <section aria-labelledby="titulo-foco" className="px-4 pt-4 pb-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="titulo-foco" className="etiqueta">
+          {elegido ? "Sismo seleccionado" : "Último sismo registrado"}
+        </h2>
+        {elegido && (
+          <button type="button" className="enlace text-xs" onClick={onVolver}>
+            Ver el último
+          </button>
+        )}
+      </div>
+
+      <div className="mt-3 flex gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="rotulo text-6xl leading-none tabular-nums">
+            <span className="sr-only">Magnitud </span>
+            {formatearMagnitud(sismo.magnitud)}
+          </p>
+          <p className="mt-3 text-base leading-snug font-semibold text-balance">{sismo.lugar}</p>
           <p className="mt-1 text-sm text-tenue">
             <TiempoRelativo ms={sismo.fecha} /> · {formatearFecha(sismo.fecha)}
           </p>
         </div>
+        <MedidorProfundidad km={sismo.profundidadKm} />
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
         <div>
           <dt className="text-tenue">Profundidad</dt>
-          <dd className="flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="size-2.5 rounded-full"
-              style={{ backgroundColor: colorDeProfundidad(sismo.profundidadKm) }}
-            />
+          <dd>
             {sismo.profundidadKm} km
             <span className="sr-only">
               , {ETIQUETA_PROFUNDIDAD[clasificarProfundidad(sismo.profundidadKm)]}
@@ -50,8 +61,8 @@ export function UltimoSismo({ sismo }: { sismo: Sismo | null }) {
         </div>
         {sismo.reportesSentido !== null && (
           <div>
-            <dt className="text-tenue">Personas que lo sintieron</dt>
-            <dd>{sismo.reportesSentido} reportes al USGS</dd>
+            <dt className="text-tenue">Lo sintieron</dt>
+            <dd>{sismo.reportesSentido} reportes</dd>
           </div>
         )}
         <div>

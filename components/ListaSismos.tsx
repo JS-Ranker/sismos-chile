@@ -12,9 +12,9 @@ interface Props {
 
 export function ListaSismos({ sismos, seleccionadoId, onSeleccionar }: Props) {
   return (
-    <ol aria-label="Sismos, del más reciente al más antiguo" className="border-t border-borde">
+    <ol aria-label="Sismos, del más reciente al más antiguo" className="border-t border-tinta">
       {sismos.map((sismo) => (
-        <li key={sismo.id} id={`sismo-${sismo.id}`} className="border-b border-borde">
+        <li key={sismo.id} id={`sismo-${sismo.id}`} className="border-b border-tinta/25">
           <button
             type="button"
             aria-pressed={seleccionadoId === sismo.id}
@@ -23,14 +23,14 @@ export function ListaSismos({ sismos, seleccionadoId, onSeleccionar }: Props) {
           >
             <span
               className="insignia-magnitud"
-              style={{ borderColor: colorDeProfundidad(sismo.profundidadKm) }}
+              style={{ "--punto": colorDeProfundidad(sismo.profundidadKm) } as React.CSSProperties}
             >
               <span className="sr-only">Magnitud </span>
               {formatearMagnitud(sismo.magnitud)}
             </span>
             <span className="min-w-0">
-              <span className="block truncate font-medium">{sismo.lugar}</span>
-              <span className="block text-sm text-tenue">
+              <span className="block truncate font-semibold">{sismo.lugar}</span>
+              <span className="tenue block text-sm text-tenue">
                 <TiempoRelativo ms={sismo.fecha} /> · {sismo.profundidadKm} km de profundidad
               </span>
             </span>

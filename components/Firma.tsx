@@ -4,14 +4,11 @@ export function Firma() {
   return (
     <a
       href="https://github.com/JS-Ranker"
-      className="group inline-flex items-center gap-2.5 rounded-md py-1 pr-2"
+      className="group inline-flex items-center gap-2 py-0.5"
     >
-      <Image src="/logo-hs.png" alt="" width={28} height={28} className="rounded-full" />
-      <span className="leading-tight">
-        <span className="block text-tenue">Desarrollado por</span>
-        <span className="block font-medium text-texto group-hover:text-marca">
-          Héctor Sanhueza
-        </span>
+      <Image src="/logo-hs.png" alt="" width={20} height={20} className="rounded-full" />
+      <span>
+        Desarrollado por <span className="font-semibold group-hover:text-marca">Héctor Sanhueza</span>
       </span>
     </a>
   );

@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MAGNITUDES_MINIMAS,
   PERIODO_INICIAL,
@@ -10,20 +10,24 @@ import {
   type Periodo,
   type ResultadoSismos,
   type Sismo,
+  formatearMagnitud,
 } from "@/lib/sismos";
+import { Cronologia } from "./Cronologia";
 import { Firma } from "./Firma";
-import { LeyendaProfundidad } from "./LeyendaProfundidad";
 import { ListaSismos } from "./ListaSismos";
 import { TiempoRelativo } from "./TiempoRelativo";
 import { UltimoSismo } from "./UltimoSismo";
 
-// Leaflet usa `window`, así que el mapa solo se carga en el navegador.
+// MapLibre usa WebGL y `window`, así que el mapa solo se carga en el navegador.
 const MapaSismos = dynamic(() => import("./MapaSismos"), {
   ssr: false,
-  loading: () => <div className="grid h-full place-items-center text-tenue">Cargando mapa…</div>,
+  loading: () => <div className="absolute inset-0 bg-[#0d2f52]" aria-hidden="true" />,
 });
 
 const ACTUALIZAR_CADA_MS = 60_000;
+/** Lo que dura repetir todo el período en la reproducción. */
+const DURACION_REPRODUCCION_MS = 26_000;
+const HORA_MS = 3_600_000;
 
 export interface Seleccion {
   id: string;
@@ -41,11 +45,17 @@ async function obtenerSismos(periodo: Periodo, signal: AbortSignal): Promise<Res
   return { sismos: cuerpo.sismos, obtenidoEn: cuerpo.obtenidoEn };
 }
 
+const ListaMemo = memo(ListaSismos);
+
 export function Explorador({ inicial }: { inicial: ResultadoSismos | null }) {
   const [periodo, setPeriodo] = useState<Periodo>(PERIODO_INICIAL);
   const [magnitudMinima, setMagnitudMinima] = useState<number>(MAGNITUDES_MINIMAS[0]);
   const [pausado, setPausado] = useState(false);
   const [seleccion, setSeleccion] = useState<Seleccion | null>(null);
+  const [panelAbierto, setPanelAbierto] = useState(false);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [reproduciendo, setReproduciendo] = useState(false);
+  const cursorRef = useRef<number | null>(null);
 
   const consulta = useQuery({
     queryKey: ["sismos", periodo],
@@ -72,145 +82,278 @@ export function Explorador({ inicial }: { inicial: ResultadoSismos | null }) {
     null,
   );
 
-  function seleccionarDesdeMapa(id: string) {
+  // La ventana de tiempo sale de la hora del servidor, no de Date.now() (ver README).
+  const fin = consulta.data?.obtenidoEn ?? 0;
+  const inicio = fin - PERIODOS[periodo].horas * HORA_MS;
+
+  const cambiarCursor = useCallback((ms: number | null) => {
+    cursorRef.current = ms;
+    setCursor(ms);
+  }, []);
+
+  // Al cambiar el período o el filtro, la reproducción empieza de cero.
+  const reiniciarReproduccion = useCallback(() => {
+    setReproduciendo(false);
+    cambiarCursor(null);
+  }, [cambiarCursor]);
+
+  useEffect(() => {
+    if (!reproduciendo) return;
+    let previo = performance.now();
+    let cuadro = 0;
+    const paso = (t: number) => {
+      const avance = (t - previo) * ((fin - inicio) / DURACION_REPRODUCCION_MS);
+      previo = t;
+      const siguiente = (cursorRef.current ?? inicio) + avance;
+      if (siguiente >= fin) {
+        setReproduciendo(false);
+        cambiarCursor(null);
+        return;
+      }
+      cambiarCursor(siguiente);
+      cuadro = requestAnimationFrame(paso);
+    };
+    cuadro = requestAnimationFrame(paso);
+    return () => cancelAnimationFrame(cuadro);
+  }, [reproduciendo, inicio, fin, cambiarCursor]);
+
+  function alternarReproduccion() {
+    if (reproduciendo) {
+      setReproduciendo(false);
+      return;
+    }
+    if (cursorRef.current === null) cambiarCursor(inicio);
+    setReproduciendo(true);
+  }
+
+  // El sismo en foco es el elegido o, si no hay, el más reciente hasta el instante de la reproducción.
+  const visibles = cursor === null ? sismos : sismos.filter((s) => s.fecha <= cursor);
+  const elegido = seleccion ? sismos.find((s) => s.id === seleccion.id) ?? null : null;
+  const foco = elegido ?? visibles[0] ?? null;
+
+  const seleccionarDesdeMapa = useCallback((id: string) => {
     setSeleccion({ id, origen: "mapa" });
+    setPanelAbierto(true);
     // En escritorio la lista está al lado del mapa: la desplazamos hasta el sismo.
-    // En móvil no, porque sacaría el mapa de la pantalla.
     if (window.matchMedia("(min-width: 64rem)").matches) {
       document.getElementById(`sismo-${id}`)?.scrollIntoView({ block: "nearest" });
     }
-  }
+  }, []);
+  const seleccionarDesdeLista = useCallback(
+    (id: string) => setSeleccion({ id, origen: "lista" }),
+    [],
+  );
+
+  const cargando = consulta.data === undefined && !consulta.isError;
 
   return (
-    <div className="flex flex-1 flex-col lg:grid lg:h-[calc(100dvh-3.5rem)] lg:min-h-0 lg:flex-none lg:grid-cols-[minmax(0,1fr)_27rem] lg:grid-rows-[minmax(0,1fr)]">
-      <section
-        aria-label="Mapa de sismos. La misma información está disponible en la lista."
-        className="relative h-[55svh] min-h-80 overflow-hidden border-b border-borde lg:h-auto lg:border-r lg:border-b-0"
-      >
-        <MapaSismos sismos={sismos} seleccion={seleccion} onSeleccionar={seleccionarDesdeMapa} />
-        <LeyendaProfundidad className="absolute bottom-6 left-3 z-[1000] hidden lg:block" />
-      </section>
-      {/* En móvil el mapa es bajo: la leyenda va debajo para no tapar sismos. */}
-      <LeyendaProfundidad compacta className="border-b border-borde px-4 py-2 lg:hidden" />
+    <div className="carta flex h-dvh flex-col">
+      <div className="relative min-h-0 flex-1 overflow-hidden border border-tinta bg-[#0d2f52]">
+        <MapaSismos
+          sismos={sismos}
+          seleccion={seleccion}
+          onSeleccionar={seleccionarDesdeMapa}
+          cursor={cursor}
+          reproduciendo={reproduciendo}
+        />
 
-      <div className="flex min-h-0 flex-col">
-        <div className="space-y-4 border-b border-borde px-4 py-4">
-          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <fieldset>
-              <legend className="etiqueta mb-1.5">Período</legend>
-              <div className="segmentado">
-                {(Object.keys(PERIODOS) as Periodo[]).map((p) => (
-                  <label key={p}>
-                    <input
-                      type="radio"
-                      name="periodo"
-                      value={p}
-                      checked={periodo === p}
-                      onChange={() => setPeriodo(p)}
-                    />
-                    <span>{PERIODOS[p].etiqueta}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
-            <div>
-              <label htmlFor="magnitud-minima" className="etiqueta mb-1.5 block">
-                Magnitud mínima
-              </label>
-              <select
-                id="magnitud-minima"
-                className="control"
-                value={magnitudMinima}
-                onChange={(e) => setMagnitudMinima(Number(e.target.value))}
-              >
-                {MAGNITUDES_MINIMAS.map((m) => (
-                  <option key={m} value={m}>
-                    M {m.toFixed(1)}+
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <EstadoActualizacion
-            actualizadoEn={consulta.data?.obtenidoEn ?? 0}
-            actualizando={consulta.isFetching}
-            pausado={pausado}
-            onAlternarPausa={() => {
-              // Al reanudar, pedimos datos de inmediato en vez de esperar al próximo minuto.
-              if (pausado) void consulta.refetch();
-              setPausado(!pausado);
-            }}
-          />
-        </div>
-
-        {/* relative: los textos sr-only (absolutos) deben quedar dentro del scroll, no del documento. */}
-        <div className="relative min-h-0 flex-1 lg:overflow-y-auto">
-          {consulta.isError && consulta.data && !cambiandoPeriodo && (
-            <p role="alert" className="aviso mx-4 mt-4">
-              No se pudo actualizar. Se muestran los últimos datos obtenidos.
-            </p>
-          )}
-
-          {consulta.isError && (consulta.data === undefined || cambiandoPeriodo) ? (
-            <ErrorCarga mensaje={consulta.error.message} onReintentar={() => consulta.refetch()} />
-          ) : consulta.data === undefined ? (
-            <p className="px-4 py-8 text-tenue">Cargando sismos…</p>
-          ) : (
-            <div aria-busy={cambiandoPeriodo} className={cambiandoPeriodo ? "opacity-50" : undefined}>
-              <UltimoSismo sismo={sismos[0] ?? null} />
-              <p aria-live="polite" className="px-4 pb-3 text-sm text-tenue">
-                {cambiandoPeriodo
-                  ? `Cargando sismos de ${PERIODOS[periodo].etiqueta}…`
-                  : resumen(sismos.length, mayor, periodo, magnitudMinima)}
-              </p>
-              {sismos.length > 0 ? (
-                <ListaSismos
-                  sismos={sismos}
-                  seleccionadoId={seleccion?.id ?? null}
-                  onSeleccionar={(id) => setSeleccion({ id, origen: "lista" })}
+        <div className="escena">
+          <header className="cartucho area-titulo px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+              <div>
+                <h1 className="rotulo text-2xl leading-none sm:text-3xl">Sismos Chile</h1>
+                <EstadoActualizacion
+                  actualizadoEn={fin}
+                  actualizando={consulta.isFetching}
+                  pausado={pausado}
+                  onAlternarPausa={() => {
+                    // Al reanudar, pedimos datos de inmediato en vez de esperar al próximo minuto.
+                    if (pausado) void consulta.refetch();
+                    setPausado(!pausado);
+                  }}
                 />
-              ) : (
-                <p className="mx-4 mb-4 rounded-md border border-borde px-4 py-6 text-center text-tenue">
-                  No hay sismos registrados con estos filtros. Prueba con un período más largo o
-                  una magnitud mínima menor.
+              </div>
+
+              <div className="flex w-full items-end gap-x-4 sm:w-auto sm:flex-wrap">
+                <fieldset>
+                  <legend className="etiqueta mb-1">Período</legend>
+                  <div className="segmentado">
+                    {(Object.keys(PERIODOS) as Periodo[]).map((p) => (
+                      <label key={p}>
+                        <input
+                          type="radio"
+                          name="periodo"
+                          value={p}
+                          checked={periodo === p}
+                          onChange={() => {
+                            setPeriodo(p);
+                            reiniciarReproduccion();
+                          }}
+                        />
+                        <span>{PERIODOS[p].etiqueta}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <div>
+                  <label htmlFor="magnitud-minima" className="etiqueta mb-1 block">
+                    Magnitud<span className="sr-only sm:not-sr-only"> mínima</span>
+                  </label>
+                  <select
+                    id="magnitud-minima"
+                    className="control"
+                    value={magnitudMinima}
+                    onChange={(e) => {
+                      setMagnitudMinima(Number(e.target.value));
+                      reiniciarReproduccion();
+                    }}
+                  >
+                    {MAGNITUDES_MINIMAS.map((m) => (
+                      <option key={m} value={m}>
+                        M {m.toFixed(1)}+
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <Cronologia
+            className={`area-crono ${panelAbierto ? "max-lg:hidden" : ""}`}
+            sismos={sismos}
+            inicio={inicio}
+            fin={fin}
+            cursor={cursor}
+            reproduciendo={reproduciendo}
+            onCursor={(ms) => {
+              setReproduciendo(false);
+              cambiarCursor(ms >= fin ? null : ms);
+            }}
+            onAlternar={alternarReproduccion}
+            onPresente={() => cambiarCursor(null)}
+          />
+
+          <aside
+            aria-label="Detalle y lista de sismos"
+            className={`cartucho area-panel flex min-h-0 flex-col overflow-hidden ${
+              panelAbierto ? "max-h-[55dvh] lg:max-h-none" : ""
+            }`}
+          >
+            {/* En móvil el panel se pliega a una línea para dejar ver el mapa. */}
+            {foco && !panelAbierto && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 px-4 py-3 text-left lg:hidden"
+                aria-expanded={false}
+                onClick={() => setPanelAbierto(true)}
+              >
+                <span className="rotulo text-3xl leading-none">{formatearMagnitud(foco.magnitud)}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{foco.lugar}</span>
+                  <span className="block text-xs text-tenue">
+                    <TiempoRelativo ms={foco.fecha} /> · Ver detalle y lista
+                  </span>
+                </span>
+              </button>
+            )}
+
+            <div
+              className={`min-h-0 flex-1 overflow-y-auto ${panelAbierto ? "" : "hidden lg:block"}`}
+            >
+              {panelAbierto && (
+                <button
+                  type="button"
+                  className="boton-tinta m-3 mb-0 w-[calc(100%-1.5rem)] justify-center lg:hidden"
+                  aria-expanded
+                  onClick={() => setPanelAbierto(false)}
+                >
+                  Ocultar lista
+                </button>
+              )}
+
+              {consulta.isError && consulta.data && !cambiandoPeriodo && (
+                <p role="alert" className="aviso mx-4 mt-4">
+                  No se pudo actualizar. Se muestran los últimos datos obtenidos.
                 </p>
               )}
-            </div>
-          )}
 
-          <footer className="space-y-2 px-4 py-6 text-xs leading-relaxed text-tenue">
-            <p>
-              Datos del{" "}
-              <a href="https://earthquake.usgs.gov/" className="enlace">
-                Servicio Geológico de EE.&nbsp;UU. (USGS)
-              </a>
-              , que en Chile registra principalmente sismos de magnitud 4 o superior. Para sismos
-              menores consulta el{" "}
-              <a href="https://www.sismologia.cl/" className="enlace">
-                Centro Sismológico Nacional
-              </a>
-              .
-            </p>
-            <p>
-              Este sitio no es un sistema oficial de alerta. Ante una emergencia sigue las
-              indicaciones de{" "}
-              <a href="https://senapred.cl/" className="enlace">
-                SENAPRED
-              </a>{" "}
-              y el{" "}
-              <a href="https://www.shoa.cl/" className="enlace">
-                SHOA
-              </a>
-              .
-            </p>
-            <div className="mt-4 border-t border-borde pt-4">
-              <Firma />
+              {consulta.isError && (consulta.data === undefined || cambiandoPeriodo) ? (
+                <ErrorCarga
+                  mensaje={consulta.error.message}
+                  onReintentar={() => consulta.refetch()}
+                />
+              ) : cargando ? (
+                <p className="px-4 py-8 text-tenue">Cargando sismos…</p>
+              ) : (
+                <div
+                  aria-busy={cambiandoPeriodo}
+                  className={cambiandoPeriodo ? "opacity-50" : undefined}
+                >
+                  <UltimoSismo
+                    sismo={foco}
+                    elegido={elegido !== null}
+                    onVolver={() => setSeleccion(null)}
+                  />
+                  <p aria-live="polite" className="px-4 pb-3 text-sm text-tenue">
+                    {cambiandoPeriodo
+                      ? `Cargando sismos de ${PERIODOS[periodo].etiqueta}…`
+                      : resumen(sismos.length, mayor, periodo, magnitudMinima)}
+                  </p>
+                  {sismos.length > 0 ? (
+                    <ListaMemo
+                      sismos={sismos}
+                      seleccionadoId={seleccion?.id ?? null}
+                      onSeleccionar={seleccionarDesdeLista}
+                    />
+                  ) : (
+                    <p className="mx-4 mb-4 border border-tinta px-4 py-6 text-center text-tenue">
+                      No hay sismos registrados con estos filtros. Prueba con un período más largo
+                      o una magnitud mínima menor.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-2 border-t border-tinta px-4 py-4 text-xs leading-relaxed text-tenue">
+                <p>
+                  Datos del{" "}
+                  <a href="https://earthquake.usgs.gov/" className="enlace">
+                    Servicio Geológico de EE.&nbsp;UU. (USGS)
+                  </a>
+                  , que en Chile registra principalmente sismos de magnitud 4 o superior. Para
+                  sismos menores consulta el{" "}
+                  <a href="https://www.sismologia.cl/" className="enlace">
+                    Centro Sismológico Nacional
+                  </a>
+                  .
+                </p>
+                <Firma />
+              </div>
             </div>
-          </footer>
+          </aside>
         </div>
       </div>
+
+      <footer className="px-1 py-2 text-xs leading-snug sm:text-[0.8125rem]">
+        <p className="mx-auto max-w-[110ch] text-center">
+          <strong className="font-semibold">Este sitio no es un sistema oficial de alerta.</strong>{" "}
+          Ante una emergencia sigue las indicaciones de{" "}
+          <a href="https://senapred.cl/" className="enlace">
+            SENAPRED
+          </a>{" "}
+          y el{" "}
+          <a href="https://www.shoa.cl/" className="enlace">
+            SHOA
+          </a>
+          .
+        </p>
+        <p className="mx-auto mt-0.5 max-w-[110ch] text-center text-[0.6875rem] text-tenue">
+          Mapa: Esri, GEBCO, NOAA, Garmin y colaboradores de OpenStreetMap · Relieve: Mapzen, USGS,
+          NOAA
+        </p>
+      </footer>
     </div>
   );
 }
@@ -235,33 +378,31 @@ function EstadoActualizacion({
   onAlternarPausa: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 text-sm">
-      <p className="flex items-center gap-2 text-tenue">
-        <span className={pausado ? "punto-vivo pausado" : "punto-vivo"} aria-hidden="true" />
-        {pausado ? (
-          "Actualización en pausa"
-        ) : actualizando ? (
-          "Actualizando…"
-        ) : actualizadoEn > 0 ? (
-          <span>
-            Actualizado <TiempoRelativo ms={actualizadoEn} />
-          </span>
-        ) : (
-          "Actualización automática cada minuto"
-        )}
-      </p>
-      <button type="button" className="boton-secundario" onClick={onAlternarPausa}>
+    <p className="mt-1.5 flex items-center gap-2 text-xs text-tenue">
+      <span className={pausado ? "punto-vivo pausado" : "punto-vivo"} aria-hidden="true" />
+      {pausado ? (
+        "Actualización en pausa"
+      ) : actualizando ? (
+        "Actualizando…"
+      ) : actualizadoEn > 0 ? (
+        <span>
+          Actualizado <TiempoRelativo ms={actualizadoEn} />
+        </span>
+      ) : (
+        "Actualización automática cada minuto"
+      )}
+      <button type="button" className="enlace" onClick={onAlternarPausa}>
         {pausado ? "Reanudar" : "Pausar"}
       </button>
-    </div>
+    </p>
   );
 }
 
 function ErrorCarga({ mensaje, onReintentar }: { mensaje: string; onReintentar: () => void }) {
   return (
-    <div role="alert" className="m-4 space-y-3 rounded-md border border-borde px-4 py-5">
+    <div role="alert" className="m-4 space-y-3 border border-tinta px-4 py-5">
       <p>{mensaje}</p>
-      <button type="button" className="boton-secundario" onClick={onReintentar}>
+      <button type="button" className="boton-tinta" onClick={onReintentar}>
         Reintentar
       </button>
     </div>
